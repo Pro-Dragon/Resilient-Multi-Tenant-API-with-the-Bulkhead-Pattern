@@ -117,7 +117,7 @@ No local Node.js installation is required; everything runs inside containers.
 ### 1. Clone the repository
 
 ```bash
-git clone <repository-url>
+git clone https://github.com/Pro-Dragon/Resilient-Multi-Tenant-API-with-the-Bulkhead-Pattern
 cd "Resilient Multi Tenant API with the Bulkhead Pattern"
 ```
 
