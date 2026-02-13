@@ -4,28 +4,49 @@ $API_URL = "http://localhost:8080"
 
 Write-Host "Starting load test against $API_URL`n" -ForegroundColor Green
 
-# Function to run free tier flood
-$freeScript = {
-    param($url)
-    $headers = @{'X-Tenant-Tier' = 'free'}
-    $results = @()
-    
-    1..300 | ForEach-Object {
-        try {
-            $response = Invoke-WebRequest -Uri "$url/api/data" -Headers $headers -UseBasicParsing -ErrorAction Stop
-            $results += "free 200"
-        } catch {
-            $code = $_.Exception.Response.StatusCode.value__
-            if ($code -eq 429) {
-                $results += "free 429"
-            } elseif ($code -eq 503) {
-                $results += "free 503"
-            } else {
-                $results += "free $code"
+function Invoke-FreeFlood {
+    param(
+        [string]$Url,
+        [int]$TotalRequests = 300,
+        [int]$Workers = 10
+    )
+
+    $perWorker = [Math]::Ceiling($TotalRequests / $Workers)
+    $jobs = @()
+
+    for ($i = 1; $i -le $Workers; $i++) {
+        $jobs += Start-Job -ScriptBlock {
+            param($jobUrl, $count)
+            $headers = @{'X-Tenant-Tier' = 'free'}
+            $results = @()
+
+            for ($j = 1; $j -le $count; $j++) {
+                try {
+                    Invoke-WebRequest -Uri "$jobUrl/api/data" -Headers $headers -UseBasicParsing -ErrorAction Stop | Out-Null
+                    $results += "free 200"
+                } catch {
+                    $code = $_.Exception.Response.StatusCode.value__
+                    if ($code -eq 429) {
+                        $results += "free 429"
+                    } elseif ($code -eq 503) {
+                        $results += "free 503"
+                    } else {
+                        $results += "free $code"
+                    }
+                }
             }
-        }
+
+            return $results
+        } -ArgumentList $Url, $perWorker
     }
-    return $results
+
+    $allResults = @()
+    foreach ($job in $jobs) {
+        $allResults += Receive-Job -Job $job -Wait
+        Remove-Job -Job $job
+    }
+
+    return $allResults
 }
 
 # Function for pro tier steady stream
@@ -68,15 +89,15 @@ $enterpriseScript = {
 
 Write-Host "Launching concurrent load..." -ForegroundColor Yellow
 
-# Start all jobs
 $jobs = @()
-$jobs += Start-Job -ScriptBlock $freeScript -ArgumentList $API_URL
 $jobs += Start-Job -ScriptBlock $proScript -ArgumentList $API_URL
 $jobs += Start-Job -ScriptBlock $enterpriseScript -ArgumentList $API_URL
 
-# Wait for all jobs to complete and collect results
-Write-Host "Waiting for jobs to complete...`n" -ForegroundColor Yellow
+Write-Host "Running free tier flood with worker jobs..." -ForegroundColor Yellow
 $allResults = @()
+$allResults += Invoke-FreeFlood -Url $API_URL -TotalRequests 300 -Workers 10
+
+Write-Host "Waiting for pro and enterprise jobs to complete...`n" -ForegroundColor Yellow
 foreach ($job in $jobs) {
     $allResults += Receive-Job -Job $job -Wait
     Remove-Job -Job $job
@@ -136,13 +157,13 @@ try {
 
 Write-Host "`n=== Summary ===" -ForegroundColor Cyan
 if ($proSuccess -ge 38 -and $enterpriseSuccess -ge 38) {
-    Write-Host "✓ Pro and Enterprise tiers remained responsive under free tier load" -ForegroundColor Green
+    Write-Host "OK: Pro and Enterprise tiers remained responsive under free tier load" -ForegroundColor Green
 } else {
-    Write-Host "✗ Some pro/enterprise requests failed - bulkhead isolation may need tuning" -ForegroundColor Red
+    Write-Host "WARN: Some pro/enterprise requests failed - bulkhead isolation may need tuning" -ForegroundColor Red
 }
 
 if ($freeRateLimited -gt 0 -or $freeError -gt 0) {
-    Write-Host "✓ Free tier experienced rate limiting/errors as expected" -ForegroundColor Green
+    Write-Host "OK: Free tier experienced rate limiting/errors as expected" -ForegroundColor Green
 } else {
-    Write-Host "✗ Free tier did not hit rate limits - may need longer test" -ForegroundColor Yellow
+    Write-Host "WARN: Free tier did not hit rate limits - may need longer test" -ForegroundColor Yellow
 }

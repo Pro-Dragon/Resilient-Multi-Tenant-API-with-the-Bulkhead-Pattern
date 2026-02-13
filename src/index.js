@@ -1,3 +1,19 @@
+/**
+ * Resilient Multi-Tenant API with Bulkhead Isolation
+ *
+ * This service exposes a REST API whose resources are partitioned by tenant
+ * tier (free / pro / enterprise).  Each tier receives:
+ *   - Its own PostgreSQL connection pool (bulkhead for DB connections).
+ *   - Its own concurrency-limited worker queue (bulkhead for request handling).
+ *   - Its own circuit breaker (prevents cascading failures).
+ *   - Its own rate limiter (controls request volume).
+ *
+ * Endpoints:
+ *   GET /health             — Health check
+ *   GET /api/data           — Tier-scoped data retrieval
+ *   GET /metrics/bulkheads  — Real-time pool & breaker metrics
+ */
+
 const express = require("express");
 const { Pool } = require("pg");
 const {
@@ -45,6 +61,11 @@ for (const tier of TIERS) {
 
 const app = express();
 
+/**
+ * Extract and validate the tenant tier from the X-Tenant-Tier header.
+ * @param {import('express').Request} req
+ * @returns {string|null}  One of 'free', 'pro', 'enterprise' or null.
+ */
 function getTier(req) {
   const headerValue = req.header("X-Tenant-Tier");
   if (!headerValue) {
@@ -59,6 +80,12 @@ function getTier(req) {
   return tier;
 }
 
+/**
+ * Check (and consume) the rate limit for a tier.
+ * Uses a fixed 60-second sliding window per tier.
+ * @param {string} tier
+ * @returns {{allowed: boolean, limit?: number}}
+ */
 function checkRateLimit(tier) {
   const limit = TIER_CONFIG[tier].rateLimit;
   if (!limit) {

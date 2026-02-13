@@ -1,0 +1,10 @@
+node_modules
+npm-debug.log*
+.git
+.gitignore
+.env
+.env.example
+*.md
+load-test.sh
+load-test.ps1
+tests/

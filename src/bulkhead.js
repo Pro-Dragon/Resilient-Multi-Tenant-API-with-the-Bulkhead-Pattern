@@ -1,3 +1,7 @@
+/**
+ * Error thrown when a circuit breaker is in the OPEN state and rejects
+ * a request immediately without attempting the protected operation.
+ */
 class CircuitOpenError extends Error {
   constructor(message) {
     super(message);
@@ -5,6 +9,15 @@ class CircuitOpenError extends Error {
   }
 }
 
+/**
+ * A three-state circuit breaker (CLOSED → OPEN → HALF_OPEN → CLOSED).
+ *
+ * After {@link failureThreshold} consecutive failures the breaker opens
+ * and fast-fails all subsequent calls.  After {@link resetTimeoutMs}
+ * milliseconds it transitions to HALF_OPEN and allows one probe call
+ * through; a successful probe closes the breaker, while a failed probe
+ * re-opens it.
+ */
 class CircuitBreaker {
   constructor(options) {
     const opts = options || {};
@@ -82,7 +95,19 @@ class CircuitBreaker {
   }
 }
 
+/**
+ * A concurrency-limited task queue that acts as a bulkhead.
+ *
+ * At most {@link poolSize} tasks run concurrently.  If all slots are
+ * occupied, incoming tasks are queued and executed in FIFO order as
+ * slots become available.  This mirrors the semantics of a bounded
+ * thread pool (e.g. Java's ExecutorService) in a single-threaded
+ * Node.js environment.
+ */
 class BulkheadQueue {
+  /**
+   * @param {number} poolSize  Maximum number of concurrent tasks.
+   */
   constructor(poolSize) {
     this.poolSize = poolSize;
     this.active = 0;
